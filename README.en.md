@@ -5,6 +5,27 @@
 An Electron desktop app for observing and pinning the upstreams behind Cline Pass:
 a real window, a tray icon, launch-at-login — no terminal, no commands.
 
+## What's new in 2.4.0
+
+This release is about making pinning actually stick:
+
+- **Capability filter `has`** — on the planner pipeline, `providerOptions.gateway.only` alone is overridden by
+  the server-side virtual model configuration; adding `gateway.has` (e.g. `vision`, `implicit-caching`) makes
+  `only` take effect. The chain dialog now includes a **two-request verification**: Group A must hit the target
+  upstream, Group B must reject a nonexistent one.
+- **Pin without a probed upstream list** — Models → Chain no longer requires channels to be discovered first;
+  enter an upstream slug such as `deepseek` manually. Whether it is honored is decided by the verification.
+- **Probe fallback** — if an invalid `only` is ignored during enumeration, the probe retries with `has`, so models
+  like `deepseek-v4.1-flash-1017` now list their available upstreams.
+- **CNY pricing** — `deepseek-v4.1-flash-1017` snapshots are priced from the official `deepseek-flash` table.
+- **Safer repository** — added `npm run check:secrets` and `.gitignore` rules for local runtime data.
+- **Rename & version** — the app is now `cline-pass-switcher-desktop-upgrade-1024`, version `2.4.0`; the data
+  directory keeps its old name so upgrades do not lose accounts, keys, or usage history.
+
+> The `has` idea and the 2026-10-23 measurements come from this LINUX DO community post:
+> [linux.do/t/topic/3064863](https://linux.do/t/topic/3064863). Thanks to its author for the testing and write-up.
+> The "Making pins actually stick" section below documents the mechanism and verification.
+
 ## Screenshots
 
 **Overview** — proxy status, client setup, account quotas:
