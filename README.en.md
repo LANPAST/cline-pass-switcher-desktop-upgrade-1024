@@ -22,6 +22,14 @@ This release is about making pinning actually stick:
 - **Rename & version** — the app is now `cline-pass-switcher-desktop-upgrade-1024`, version `2.4.0`; the data
   directory keeps its old name so upgrades do not lose accounts, keys, or usage history.
 
+### In practice
+
+A real request-history comparison (above the red line is after the fix): once the request carries
+`providerOptions.gateway.has`, `only: ["deepseek"]` is honored and the actual upstream changes from
+`openai-compatible-private` to `deepseek`.
+
+![Request history before and after the capability filter](docs/screenshots/pin-after.png)
+
 > The `has` idea and the 2026-10-23 measurements come from this LINUX DO community post:
 > [linux.do/t/topic/3064863](https://linux.do/t/topic/3064863). Thanks to its author for the testing and write-up.
 > The "Making pins actually stick" section below documents the mechanism and verification.

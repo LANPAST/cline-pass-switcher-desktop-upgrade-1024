@@ -21,6 +21,13 @@
 - **改名与版本**：应用名改为 `cline-pass-switcher-desktop-upgrade-1024`，版本 `2.4.0`；
   数据目录仍沿用旧名，升级不会丢账号、密钥和用量历史。
 
+### 实际效果
+
+下面是真实的请求历史对比（红线以上为修改后）：请求体带上 `providerOptions.gateway.has` 后，
+`only: ["deepseek"]` 真正生效，实际渠道从 `openai-compatible-private` 变成 `deepseek`。
+
+![能力过滤生效前后的请求历史](docs/screenshots/pin-after.png)
+
 > 能力过滤 `has` 的思路与 2026-10-23 的实测结论来自 LINUX DO 的这篇实测帖：
 > [linux.do/t/topic/3064863](https://linux.do/t/topic/3064863)。感谢原帖作者的实测与整理。
 > 下文「让钉住真正生效」一节记录了完整机制和验证方法。
