@@ -33,3 +33,27 @@ scripts/.strings*.json
 scripts/.ui-strings.json
 scripts/.harvested.json
 scripts/.to-translate.json
+
+# ---------- 本地运行数据（含明文 API Key，绝不入仓）----------
+# 桌面版把数据写到用户目录（%APPDATA%\Cline Pass Switcher\ 等），本来就不在仓库里；
+# 但直接跑 `npm run engine` 时 DATA_DIR 默认是 src/main/engine/，会在仓库内生成这些文件。
+/config.json
+/metadata.json
+/app-settings.json
+/usage/
+/src/main/engine/config.json
+/src/main/engine/metadata.json
+/src/main/engine/app-settings.json
+/src/main/engine/usage/
+
+# 注意：resources/seed/metadata.json 是随程序分发的演示数据，必须入库，不要用全局
+# `metadata.json` 规则把它一起忽略了。
+
+# ---------- 环境变量与证书 ----------
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx

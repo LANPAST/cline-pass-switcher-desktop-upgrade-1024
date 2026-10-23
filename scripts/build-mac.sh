@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # 本地构建（macOS）—— 只构建，不打包 dmg
 #
-# 产物：dist/mac/Cline Pass Switcher.app（Apple Silicon 上是 dist/mac-arm64/）
+# 产物：dist/mac/cline-pass-switcher-desktop-upgrade-1024.app（Apple Silicon 上是 dist/mac-arm64/）
 # 双击或用 open 命令即可运行。
 #
 # 必须在 macOS 上跑 —— Windows 打不了 mac 包（electron-builder 需要 macOS
@@ -66,7 +66,7 @@ npx electron-builder --mac "--$ARCH" --dir
 # electron-builder 的 mac 输出目录：arm64 用 mac-arm64，x64 用 mac
 APP=""
 for d in "dist/mac-arm64" "dist/mac"; do
-  if [ -d "$d/Cline Pass Switcher.app" ]; then APP="$d/Cline Pass Switcher.app"; break; fi
+  if [ -d "$d/cline-pass-switcher-desktop-upgrade-1024.app" ]; then APP="$d/cline-pass-switcher-desktop-upgrade-1024.app"; break; fi
 done
 
 if [ -z "$APP" ]; then

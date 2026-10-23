@@ -1,4 +1,4 @@
-/* Cline Pass Switcher —— 桌面客户端样式
+/* cline-pass-switcher-desktop-upgrade-1024 —— 桌面客户端样式
    数据色板已用 dataviz 校验器在本应用深色面板（#121a22）上验证：
    分类槽位 #3987e5 / #d95926 全项 PASS；状态色四项对比度 >= 3:1。
    状态色始终「图标 + 文字」成对出现，不靠颜色单独承载语义。 */
@@ -79,10 +79,15 @@ body[data-platform="win32"] .titlebar,
 body[data-platform="linux"] .titlebar { padding-right: 148px; }  /* 让开系统控件叠加 */
 
 .tb-left, .tb-right { display: flex; align-items: center; gap: 8px; }
+.tb-left { min-width: 0; }
 .tb-center { flex: 1; display: flex; justify-content: center; }
-.brand { display: flex; align-items: center; gap: 8px; }
+.brand { display: flex; align-items: center; gap: 8px; min-width: 0; }
 .brand-mark { border-radius: 5px; }
-.brand-name { font-weight: 600; font-size: 12.5px; letter-spacing: .2px; color: var(--ink); }
+/* 应用名改成了很长的 kebab-case：窄窗口下省略，不把连接状态挤出去 */
+.brand-name {
+  font-weight: 600; font-size: 12.5px; letter-spacing: .2px; color: var(--ink);
+  max-width: 280px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
 .brand-ver { font-size: 11px; font-variant-numeric: tabular-nums; color: var(--ink-3); padding: 1px 5px; border: 1px solid var(--border); border-radius: 5px; }
 
 .conn {

@@ -252,7 +252,7 @@
         baseUrl: state.baseUrl,
         apiKey: apiKey,
         model: state.model,
-        notes: '由 Cline Pass Switcher 生成 · ' + state.baseUrl + ' · ' + FORMAT_NOTE,
+        notes: '由 cline-pass-switcher-desktop-upgrade-1024 生成 · ' + state.baseUrl + ' · ' + FORMAT_NOTE,
         enabled: state.activate,
         extraEnv: extraEnv(),
         usageKey: state.withUsage ? usageKey : '',

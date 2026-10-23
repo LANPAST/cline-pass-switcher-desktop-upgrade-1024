@@ -80,6 +80,9 @@ eq(chat.tools[0].function.name, 'Read', 'tools 转 function');
 eq(chat.tools[0].function.parameters, { type: 'object', properties: { path: { type: 'string' } }, required: ['path'] }, 'input_schema → parameters');
 eq(chat.tool_choice, 'auto', 'tool_choice auto');
 ok(!('anthropic_version' in chat) && !('metadata' in chat), 'Anthropic 专有字段没有被带上');
+// 中转不能把网关路由扩展字段吞掉（能力过滤 has 就挂在这里）
+eq(toChatRequest({ messages: [], providerOptions: { gateway: { has: ['vision'] } } }).providerOptions?.gateway?.has?.[0],
+  'vision', 'providerOptions 原样透传（中转不丢网关路由字段）');
 
 // tool_choice 的其它取值
 eq(toChatRequest({ messages: [], tools: [{ name: 'T' }], tool_choice: { type: 'any' } }).tool_choice, 'required', 'tool_choice any → required');

@@ -63,6 +63,8 @@ export const DEEPSEEK_CNY = {
   aliases: {
     'deepseek-flash': 'deepseek-flash',
     'deepseek-v4.1-flash': 'deepseek-flash',
+    // 快照版（1017）与 v4.1-flash 同价；它没有 8 位日期后缀，不会被 resolve 的日期剥离规则覆盖
+    'deepseek-v4.1-flash-1017': 'deepseek-flash',
     'deepseek-v4-flash': 'deepseek-flash',
     'deepseek-v4-flash-0731': 'deepseek-flash',
     'deepseek-v4-flash-vision-exp': 'deepseek-flash',

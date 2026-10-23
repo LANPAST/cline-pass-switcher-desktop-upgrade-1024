@@ -21,6 +21,37 @@ const CONFIG_PATH = path.join(DATA_DIR, 'config.json');
 const META_PATH = path.join(DATA_DIR, 'metadata.json');
 const PUBLIC_DIR = path.join(__dirname, 'public');
 
+// ---------- 能力过滤（gateway.has）----------
+// 2026-10-23 对两把 Cline Pass key 的实测结论：
+// 规划器管道里**单独**发 providerOptions.gateway.only 会被服务端「虚拟模型配置」覆盖 ——
+// 连不存在的上游都能成功返回；在同一个请求里再带上 gateway.has 能力过滤后，only 才真正被执行：
+// 无效上游会被拒绝，响应元数据里的 finalProvider 也会变成被钉住的上游。
+// 具体内部机制没有服务端源码可查，这里只把它当作「让 only 生效的必要条件」，
+// 并在界面上提供两组真实请求的对照验证，不把推测写成结论。
+//
+// 这对标签就是那次实测用的组合。注意：能力过滤会把不满足条件的上游**全部排除**，
+// 所以只对明确配置过（或已实测有效）的模型发送，绝不全局默认 —— 否则一个不支持这些
+// 能力的模型会直接变成「没有可用上游」。
+const FIELD_TESTED_HAS = ['vision', 'implicit-caching'];
+
+// 能力标签规范化：去空、去重、小写，限制字符与个数（最终会写进 config.json）
+function normalizeHas(v) {
+  return [...new Set((Array.isArray(v) ? v : [])
+    .map((s) => String(s).trim().toLowerCase())
+    .filter((s) => /^[a-z0-9][a-z0-9._-]{0,40}$/.test(s)))].slice(0, 12);
+}
+// 没有显式配置时的默认值（保守）：只覆盖已实测有效的那一类 ——
+// 「规划器管道 + 只钉 deepseek + 多模态的 v4.1-flash / vision 变体」。
+// 纯文本模型（如 v4-pro）不能带 vision —— 会一个上游都匹配不到；只带 implicit-caching 是否也能
+// 让 only 生效，没有实测证据，所以不自动开启。这类模型交给渠道编辑里的两组请求验证后再决定。
+function defaultHasFor(modelId, upstreams) {
+  const meta = META.models[modelId] || {};
+  const ups = Array.isArray(upstreams) ? upstreams : [];
+  if (meta.pipeline !== 'planner' || ups.length !== 1 || ups[0] !== 'deepseek') return [];
+  if (!/deepseek/i.test(modelId)) return [];
+  return /v4\.1-flash|vision/i.test(modelId) ? [...FIELD_TESTED_HAS] : [];
+}
+
 const DEFAULT_CONFIG = {
   port: 3123,
   apiKey: '',
@@ -49,7 +80,8 @@ const DEFAULT_CONFIG = {
     'cline-pass/qwen3.7-max',
   ],
   // modelId -> { upstreams: string[]（有序优先列表，空=自动）, exclude: string[]（排除列表，优先级高于勾选）,
-  //              pinMode: 'strict'|'preferred', sort: 'cost'|'ttft'|'tps'|null }
+  //              pinMode: 'strict'|'preferred', sort: 'cost'|'ttft'|'tps'|null,
+  //              has: string[]（能力过滤，随 providerOptions.gateway.has 发给规划器管道；空=关闭）}
   // 请求按 upstreams 顺序逐个钉住尝试：第一个异常（非 200 / 网络失败 / 超时）自动顺切下一个，
   // 全部失败才把最后一个错误透传给客户端；exclude 中的上游永不被使用（自动模式下注入排除偏好）。
   // upstream 为旧版单上游兼容镜像（取列表第一个），maxRetries 已退役（旧值仅作回滚兼容保留在文件里）。
@@ -105,6 +137,21 @@ config.accountMode = config.accountMode === 'roundrobin' ? 'roundrobin' : 'singl
     if (c.exclude === undefined) { c.exclude = []; dirty = true; }
     if (!Array.isArray(c.upstreams)) { c.upstreams = []; dirty = true; }
     if (!Array.isArray(c.exclude)) { c.exclude = []; dirty = true; }
+  }
+  if (dirty) saveConfig();
+})();
+
+// perModel.has 升级：老配置没有这个字段时补上。
+// 「规划器 + 只钉 deepseek」自动带实测有效的 vision/implicit-caching，历史钉住配置不用手改就能生效；
+// 其余模型显式写空数组（关闭）。显式配置过的值（包括空数组）不会被改写。
+(function migrateGatewayHas() {
+  let dirty = false;
+  for (const [id, c] of Object.entries(config.perModel || {})) {
+    if (!c || typeof c !== 'object') continue;
+    if (!Array.isArray(c.has)) {
+      c.has = defaultHasFor(id, c.upstreams);
+      dirty = true;
+    }
   }
   if (dirty) saveConfig();
 })();
@@ -249,11 +296,28 @@ function parseRouting(json) {
 async function harvestAvailableProviders(modelId, pipeline) {
   const acc = pickAccount();
   const base = { model: modelId, messages: [{ role: 'user', content: 'hi' }], max_tokens: 16 };
-  const body = pipeline === 'planner'
-    ? { ...base, providerOptions: { gateway: { only: ['__probe__'] } } }
-    : { ...base, provider: { only: ['__probe__'] } };
-  const { json } = await fetchJSON(`${config.upstreamBase}/chat/completions`, { method: 'POST', headers: chatHeaders(acc.key), body: JSON.stringify(body) }, 60000);
-  const err = json?.error;
+  const has = normalizeHas((config.perModel[modelId] || {}).has);
+  const send = async (caps) => {
+    const body = pipeline === 'planner'
+      ? { ...base, providerOptions: { gateway: { only: ['__probe__'], ...(caps.length ? { has: caps } : {}) } } }
+      : { ...base, provider: { only: ['__probe__'] } };
+    const { json } = await fetchJSON(`${config.upstreamBase}/chat/completions`,
+      { method: 'POST', headers: chatHeaders(acc.key), body: JSON.stringify(body) }, 60000);
+    return json;
+  };
+  let json = await send([]);
+  let err = json?.error;
+  // 规划器管道上 only 可能被服务端忽略（2026-10-23 实测），第一次探测不一定报「没有匹配上游」：
+  // 它可能直接成功，也可能因为推理模型耗尽 max_tokens 报 "empty response content"。
+  // 只要错误里还没有候选清单、又不是鉴权/限流问题，就带上该模型的 has 再探一次 ——
+  // 只有 has 在场，路由层才会真正按 only 报错并列出可用渠道。
+  const errText0 = typeof err === 'string' ? err : '';
+  const alreadyListed = /available providers are/i.test(errText0);
+  const fatal = /unauthorized|re-authenticate|invalid\s*api|401|403|429|rate-?limit/i.test(errText0);
+  if (!alreadyListed && !fatal && pipeline === 'planner' && has.length) {
+    json = await send(has);
+    err = json?.error;
+  }
   if (typeof err !== 'string') return null;
   if (pipeline === 'planner') {
     const m = /Available providers are:\s*([^.]+)/.exec(err);
@@ -331,7 +395,7 @@ function classifyUpstreamError(msg) {
   const m = String(msg || '');
   if (/empty response content/i.test(m)) return 'ok';                     // 请求已到达模型（推理耗尽 max_tokens 导致内容为空）
   if (/429|rate-?limited|temporarily rate/i.test(m)) return 'limited';   // 渠道有效，共享池限流中
-  if (/invalid_request|modelid|no allowed providers|no available providers|not found|unsupported/i.test(m)) return 'bad'; // 不可钉住
+  if (/invalid_request|modelid|no allowed providers|no available providers|no matching|no providers? match|not found|unsupported/i.test(m)) return 'bad'; // 不可钉住
   if (/unauthorized|re-authenticate|401/i.test(m)) return 'auth';        // 账号 key 问题，与渠道无关
   return 'unknown';
 }
@@ -365,12 +429,15 @@ async function validateUpstreams(modelId) {
   const acc = pickAccount();
   const results = {};
   const batch = 5;
+  // 校验必须带当前配置的能力过滤：否则规划器管道上 only 会被网关忽略，
+  // 「每个渠道都可用」只是假象（实测连不存在的上游都能成功）。
+  const has = normalizeHas((config.perModel[modelId] || {}).has);
   for (let i = 0; i < list.length; i += batch) {
     await Promise.all(list.slice(i, i + batch).map(async (slug) => {
       const t0 = Date.now();
       const base = { model: modelId, messages: [{ role: 'user', content: 'hi' }], max_tokens: 16 };
       const body = pipeline === 'planner'
-        ? { ...base, providerOptions: { gateway: { only: [slug] } } }
+        ? { ...base, providerOptions: { gateway: { only: [slug], ...(has.length ? { has } : {}) } } }
         : { ...base, provider: { only: [slug] } };
       const { json } = await fetchJSON(`${config.upstreamBase}/chat/completions`, {
         method: 'POST', headers: chatHeaders(acc.key), body: JSON.stringify(body),
@@ -390,6 +457,86 @@ async function validateUpstreams(modelId) {
   META.models[modelId] = { ...meta, upstreamStatus: { ...(meta.upstreamStatus || {}), ...results }, validatedAt: Date.now() };
   saveMeta();
   return results;
+}
+
+// 对照验证「能力过滤是否让 only 真正生效」—— 复刻 2026-10-23 的两组实测：
+//   A 组：only=[目标上游] + has → 读响应元数据 finalProvider，必须等于目标上游；
+//   B 组：only=['not-a-real-provider'] + has → 必须被网关拒绝（证明 only 没被忽略）。
+// 只有 A 命中且 B 被拒绝，才能说这套参数在这把 key 上有效；任一不成立都如实报告，不做推测。
+// 用流式请求：截图里的结论正是从流式响应里读的，且网关可能以 HTTP 200 + SSE 错误应答。
+async function verifyPinEnforcement(modelId, upstream, hasOverride) {
+  const meta = META.models[modelId] || {};
+  const pipeline = meta.pipeline || null;
+  const cfg = config.perModel[modelId] || {};
+  const upstreamSlug = String(upstream || (cfg.upstreams || [])[0] || '').trim();
+  const has = normalizeHas(hasOverride !== undefined ? hasOverride : cfg.has);
+  if (pipeline === 'direct') {
+    return { ok: true, applicable: false, reason: 'direct', message: '直连管道（OpenRouter）的 provider.only 本来就会透传，不需要能力过滤。' };
+  }
+  if (!upstreamSlug) return { ok: false, error: '先指定一个要钉住的上游' };
+  if (!has.length) return { ok: true, applicable: false, reason: 'no-has', message: '这个模型没有配置能力过滤（has），无法做对照验证。' };
+  const acc = pickAccount();
+  if (!acc || !acc.key) return { ok: false, error: '没有可用的 Cline 账号密钥' };
+
+  const post = async (only, timeoutMs) => {
+    const t0 = Date.now();
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), timeoutMs);
+    const body = {
+      model: modelId,
+      messages: [{ role: 'user', content: 'Reply with the word OK' }],
+      max_tokens: 256,
+      stream: true,
+      providerOptions: { gateway: { only: [only], has } },
+    };
+    try {
+      const res = await fetch(`${config.upstreamBase}/chat/completions`, {
+        method: 'POST', headers: chatHeaders(acc.key), body: JSON.stringify(body), signal: ctrl.signal,
+      });
+      const text = await res.text();
+      let json = null;
+      try { json = JSON.parse(text); } catch { /* SSE 或非 JSON */ }
+      let error = json?.error ? errText(json.error) : null;
+      if (!error) {
+        for (const line of text.split('\n')) {
+          if (!line.startsWith('data:')) continue;
+          const payload = line.slice(5).trim();
+          if (!payload || payload === '[DONE]') continue;
+          try { const c = JSON.parse(payload); if (c.error) { error = errText(c.error); break; } } catch { /* 不完整行 */ }
+        }
+      }
+      const routing = json && !json.error ? parseRouting(json) : sniffRouting(text);
+      return {
+        status: res.status, ms: Date.now() - t0, error,
+        actual: routing.finalProvider || routing.provider || null, raw: text.slice(0, 400),
+      };
+    } catch (e) {
+      return { status: 0, ms: Date.now() - t0, error: e.message, actual: null, raw: '' };
+    } finally {
+      clearTimeout(timer);
+    }
+  };
+
+  const a = await post(upstreamSlug, 180000);
+  const b = await post('not-a-real-provider', 60000);
+  const authIssue = [a.error, b.error].some((m) => /unauthorized|re-authenticate|invalid\s*api|401|403/i.test(String(m || '')));
+  const aMatched = !a.error && !!a.actual && a.actual.toLowerCase() === upstreamSlug.toLowerCase();
+  // 只认「确实是因为没有匹配上游而被拒」；网络错误、限流、鉴权失败都不算证据。
+  const bRejected = !!b.error && !authIssue &&
+    /match|no (?:allowed |available )?providers?|no upstream|not available|unsupported|invalid/i.test(String(b.error));
+  const enforced = aMatched && bRejected;
+  return {
+    ok: true, applicable: true, model: modelId, pipeline, upstream: upstreamSlug, has, enforced, authIssue,
+    a: { sentOnly: upstreamSlug, status: a.status, ms: a.ms, actual: a.actual, matched: aMatched, error: a.error || null, raw: a.raw },
+    b: { sentOnly: 'not-a-real-provider', status: b.status, ms: b.ms, rejected: bRejected, error: b.error || null, raw: b.raw },
+    note: enforced
+      ? '能力过滤已让 only 生效：A 组命中目标上游，B 组的无效上游被拒绝。'
+      : authIssue
+        ? '账号鉴权失败，无法判断（不是参数问题）。'
+        : !aMatched
+          ? 'A 组没有落在目标上游：钉住可能仍未生效，或能力标签把该上游排除了。'
+          : 'B 组的无效上游没有被拒绝：only 仍被网关忽略，这组参数在这把 key 上不成立。',
+  };
 }
 
 // 从官方接口、官方文档与社区注册表拉取最新 ClinePass 订阅模型清单（只增不删）
@@ -568,19 +715,25 @@ function unwrap(json) {
 //   必须用 providerOptions.gateway.{only,order,sort}；流式同样生效。
 // - 直连管道（OpenRouter）：顶层 provider.{only,order,sort} 生效；providerOptions 被忽略。
 // - 管道未知时两种形式同时注入，各自取用、互不干扰。
+//
+// gateway.has 是 2026-10-23 实测出来的关键补充：规划器管道上**只发 only 不生效**
+// （服务端虚拟模型配置会覆盖客户端路由限制），带上能力过滤后 only 才被执行。
+// 只对规划器（或尚未探测）注入；直连 OpenRouter 没有这个字段。
 const OR_SORT = { cost: 'price', ttft: 'latency', tps: 'throughput' };
 
 // upstream: 本次尝试钉住的上游（null=自动）；orderRest: preferred 模式下排在当前上游之后的回退序列；
 // excludeList: 排除列表。网关不支持 exclude/ignore 字段（实测被静默忽略），因此排除统一换算成 only 白名单：
 // 自动模式 only=已知上游-排除；preferred 钉住模式 order=[当前,...] 且 only=已知上游-排除（防止网关回退到被排除渠道）；
 // 严格钉住模式 only=[当前上游]，天然排除其他一切渠道。
-function injectPrefs(body, modelId, { upstream, orderRest = [], excludeList = [], strict = true, sort = null }) {
+// has: 能力过滤（vision / implicit-caching / …），与 only/order 同时出现时只才真正生效。
+function injectPrefs(body, modelId, { upstream, orderRest = [], excludeList = [], strict = true, sort = null, has = [] }) {
   const b = JSON.parse(JSON.stringify(body));
   const exclude = (excludeList || []).filter((u) => u !== upstream);
   const meta = META.models[modelId] || {};
   const known = meta.upstreams || [];
   const allowList = exclude.length ? known.filter((u) => !exclude.includes(u)) : null;
-  if (!upstream && !sort && !(allowList && allowList.length)) return b;
+  const caps = normalizeHas(has);
+  if (!upstream && !sort && !(allowList && allowList.length) && !caps.length) return b;
   const pipeline = meta.pipeline || null;
   const useVercel = pipeline === 'planner' || pipeline === null;
   const useOpenRouter = pipeline === 'direct' || pipeline === null;
@@ -596,6 +749,7 @@ function injectPrefs(body, modelId, { upstream, orderRest = [], excludeList = []
       gw.only = allowList;
     }
     if (sort) gw.sort = sort;
+    if (caps.length) gw.has = caps;
     b.providerOptions = { ...(b.providerOptions || {}), gateway: { ...(b.providerOptions?.gateway || {}), ...gw } };
   }
   if (useOpenRouter) {
@@ -625,7 +779,8 @@ function buildAttempts(modelId, cfg) {
   const wanted = listed.filter((u) => !excl.has(u));
   const strict = (cfg?.pinMode || 'strict') === 'strict';
   const sort = cfg?.sort || null;
-  const base = { strict, sort, excludeList: exclude };
+  const has = normalizeHas(cfg?.has);
+  const base = { strict, sort, excludeList: exclude, has };
   if (wanted.length) {
     // preferred 模式：当前上游排在 order 首位，其余勾选项作为网关侧回退序列；排除列表随行（限制网关回退范围）
     return wanted.map((u, i) => ({ ...base, upstream: u, orderRest: strict ? [] : wanted.filter((_, j) => j !== i) }));
@@ -1054,32 +1209,40 @@ const server = http.createServer(async (req, res) => {
       return sendJSON(res, r.ok ? 200 : 502, r);
     }
     if (req.method === 'POST' && p === '/api/test') {
-      // 临时配置可带 upstreams/exclude（数组）或旧版 upstream（单值），完整走故障转移链路
-      const { model, upstream, upstreams, exclude } = await JSON.parse(await readBody(req).then((b) => b.toString()));
+      // 临时配置可带 upstreams/exclude/has（数组）或旧版 upstream（单值），完整走故障转移链路
+      const { model, upstream, upstreams, exclude, has } = await JSON.parse(await readBody(req).then((b) => b.toString()));
       if (!model) return sendJSON(res, 400, { error: 'model required' });
       const t0 = Date.now();
       const cfg = { ...(config.perModel[model] || {}) };
       if (upstreams !== undefined) cfg.upstreams = upstreams;
       else if (upstream !== undefined) cfg.upstreams = upstream ? [upstream] : [];
       if (exclude !== undefined) cfg.exclude = exclude;
+      if (has !== undefined) cfg.has = normalizeHas(has);
       const body = { model, messages: [{ role: 'user', content: 'Reply with the word OK' }], max_tokens: 256 };
       const chain = await runChatChain(req, body, model, cfg, { stream: false, attemptTimeoutMs: 180000 });
       const trace = chain.trace || [];
       if (chain.status !== 200) {
         return sendJSON(res, 200, {
           ok: false, error: (chain.out?.error?.message || 'upstream error').slice?.(0, 400) || 'upstream error',
-          targets: (cfg.upstreams || []).filter(Boolean), exclude: cfg.exclude || [], trace,
+          targets: (cfg.upstreams || []).filter(Boolean), exclude: cfg.exclude || [], has: normalizeHas(cfg.has), trace,
         });
       }
       const r = parseRouting(chain.out);
       record(model, { provider: r.finalProvider, canonical: r.canonicalSlug, ms: Date.now() - t0, stream: false, attempts: trace.map((t) => t.upstream || 'auto'), error: null, account: chain.acc?.name || null });
       return sendJSON(res, 200, {
         ok: true, ms: Date.now() - t0,
-        targets: (cfg.upstreams || []).filter(Boolean), exclude: cfg.exclude || [],
+        targets: (cfg.upstreams || []).filter(Boolean), exclude: cfg.exclude || [], has: normalizeHas(cfg.has),
         actual: r.finalProvider, actualName: r.finalProviderName, pipeline: r.pipeline, pinnable: r.pipeline !== null,
         canonicalSlug: r.canonicalSlug, fallbacks: r.fallbacks, content: (r.content || '').slice(0, 120),
         account: chain.acc?.name || null, trace,
       });
+    }
+    // 两组对照验证：能力过滤有没有让 only 真正生效（详见 verifyPinEnforcement 的注释）
+    if (req.method === 'POST' && p === '/api/verify-pin') {
+      const { model, upstream, has } = await JSON.parse(await readBody(req).then((b) => b.toString()));
+      if (!model) return sendJSON(res, 400, { error: { message: 'model required' } });
+      const r = await verifyPinEnforcement(model, upstream, has);
+      return sendJSON(res, r.ok === false ? 400 : 200, r);
     }
     if (req.method === 'GET' && p === '/api/accounts') {
       return sendJSON(res, 200, {
@@ -1146,7 +1309,11 @@ const server = http.createServer(async (req, res) => {
       const results = await validateUpstreams(model);
       const summary = { ok: 0, limited: 0, bad: 0, auth: 0, unknown: 0 };
       for (const r of Object.values(results)) summary[r.status] = (summary[r.status] || 0) + 1;
-      return sendJSON(res, 200, { ok: true, summary, results, upstreams: META.models[model]?.upstreams || [] });
+      return sendJSON(res, 200, {
+        ok: true, summary, results,
+        upstreams: META.models[model]?.upstreams || [],
+        has: normalizeHas((config.perModel[model] || {}).has),
+      });
     }
     if (req.method === 'POST' && p === '/api/fetch-official-models') {
       const r = await fetchOfficialModels();
@@ -1313,6 +1480,8 @@ const server = http.createServer(async (req, res) => {
             exclude,
             pinMode: c.pinMode === 'preferred' ? 'preferred' : 'strict',
             sort: ['cost', 'ttft', 'tps'].includes(c.sort) ? c.sort : null,
+            // 未传 has 时按「规划器 + 只钉 deepseek」补已实测有效的组合；显式传 [] 表示关闭。
+            has: c.has === undefined ? defaultHasFor(m, upstreams) : normalizeHas(c.has),
           };
         }
         saveConfig();

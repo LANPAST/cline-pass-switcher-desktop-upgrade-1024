@@ -1,4 +1,4 @@
-# Cline Pass Switcher — Desktop
+# cline-pass-switcher-desktop-upgrade-1024 — Desktop
 
 [中文](README.md) · [English](README.en.md)
 
@@ -20,14 +20,16 @@ a real window, a tray icon, launch-at-login — no terminal, no commands.
 ## What it solves
 
 The `provider.*` fields in a `cline-pass/*` request are **dropped** by the Cline gateway, which
-then picks an upstream itself. So "which upstream am I actually hitting, can I pin it, is it still
-alive?" is invisible from the client side.
+then picks an upstream itself. On the planner pipeline, `only` additionally needs the
+`providerOptions.gateway.has` capability filter to be enforced (see below). So "which upstream am I
+actually hitting, can I pin it, is it still alive?" is invisible from the client side.
 
 | Capability | Description |
 |---|---|
 | Pipeline detection | Whether a model uses `direct` (OpenRouter) or `planner` (Vercel AI Gateway) |
 | Upstream enumeration | Reads the available upstream list from a tiny real request's metadata |
 | Ordered pinning | A per-model pin chain tried in order, with automatic failover and an exclude list |
+| Capability filter | Adds `gateway.has` on the planner pipeline so `only` is actually enforced (otherwise the gateway ignores the pin) |
 | Pin verification | Pins each upstream once to test real availability, saved as status |
 | Account pool | Round-robin or manual, plus official quotas (5-hour / weekly / monthly) |
 | Request history | Actual upstream, backing model, latency and account for every request |
@@ -39,7 +41,7 @@ alive?" is invisible from the client side.
 
 ## Getting started
 
-**Install**: grab `ClinePassSwitcher-Setup-<version>.exe` (installer) or
+**Install**: grab `cline-pass-switcher-desktop-upgrade-1024-Setup-<version>.exe` (installer) or
 `-Portable-<version>.exe` (single file) from
 [Releases](https://github.com/lnsane/cline-pass-switcher-desktop/releases).
 On first launch, add your Cline Pass API key (starts with `sk_`) in **Accounts** and save.
@@ -74,6 +76,44 @@ for its own platform — push a tag to let CI build the other one.
 | Claude Code | `ANTHROPIC_BASE_URL=http://127.0.0.1:3199` |
 
 Use the model name as-is: `cline-pass/xxx`. Both protocols support tool calling and streaming.
+
+## Making pins actually stick: the `has` capability filter
+
+On the planner pipeline, sending **only** `providerOptions.gateway.only` does not work: the server-side
+virtual-model configuration overrides the client's routing restriction — a field test found that even a
+nonexistent upstream would succeed. On 2026-10-23, testing two keys showed that adding a capability
+filter, `providerOptions.gateway.has`, in the same request makes `only` actually take effect (invalid
+upstreams are rejected, and `finalProvider` in the response metadata becomes the pinned upstream).
+
+How this app handles it:
+
+- **Pin even when probing finds nothing**: **Models → Chain** no longer requires an upstream list —
+  use **Add upstream manually** and enter `deepseek` (or any upstream slug), then run Test / Verify as usual.
+  Whether the pin is honored is still decided by the verification result.
+- Each model can configure its own capability tags (**Models → Chain → Capability filter**). By default
+  only **planner pipeline + pinned solely to `deepseek` + a multimodal model (v4.1-flash / vision)** gets
+  `vision` + `implicit-caching` automatically — the model family used in the field test. Text-only models
+  (e.g. v4-pro) are left alone: adding `vision` would match no upstream, and whether `implicit-caching`
+  alone also enforces `only` has not been measured. You can try it in the chain dialog and run the
+  two-request verification before saving. Other models stay off as well. The filter excludes every
+  upstream that lacks these capabilities, so enabling it blindly on an unverified model can leave no
+  upstream available.
+- A planner-pipeline model that is pinned but has no capability filter is flagged in the table as
+  "pin may be ignored" — that is exactly the case where `only` alone does nothing.
+- The outgoing body carries `{ "providerOptions": { "gateway": { "only": [...], "has": [...] } } }` at the
+  top level. The direct (OpenRouter) pipeline does not send `has`; it already passes `provider.only` through.
+- **Verify all upstreams** includes the configured `has`, so the results reflect real pinnability instead
+  of "everything looks available".
+- **Verify the pin is honored (two requests)** in the chain dialog reproduces the field test: Group A sends
+  `only=[first in chain]` + `has` and must match it; Group B swaps `only` for `not-a-real-provider` and must
+  be rejected. Only when both hold is the filter considered effective.
+- Upgrade note: if `deepseek` was already pinned on a multimodal model, the capability filter is
+  backfilled into `config.json` on startup — no reconfiguration needed. Text-only models are left as-is
+  and flagged as "pin may be ignored". Uncheck it in the chain dialog to turn it off.
+
+> This is an **empirical finding, not a documented contract**: the internal mechanism cannot be verified
+> without server source, and it may change per key, model, or over time. Re-run the verification after
+> switching keys or models instead of trusting the final answer alone.
 
 ## Usage statistics
 
@@ -122,6 +162,7 @@ Available in **Overview → Client setup** and **Settings → Data**. It merges 
 
 ```bash
 npm run test:unit          # protocol translation state machine
+npm run test:has           # capability filter: only+has injection, two-group check, config migration
 npm run test:usage         # usage statistics core
 npm run test:cny           # DeepSeek CNY pricing (incl. cross-timezone)
 npm run test:usage-offline # usage end-to-end (fully offline)

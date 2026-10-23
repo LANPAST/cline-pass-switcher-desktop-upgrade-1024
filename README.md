@@ -1,4 +1,4 @@
-# Cline Pass Switcher —— 桌面版
+# cline-pass-switcher-desktop-upgrade-1024 —— 桌面版
 
 [中文](README.md) · [English](README.en.md)
 
@@ -27,6 +27,7 @@ Cline Pass 订阅模型（`cline-pass/*`）请求体里的 `provider.*` 会被�
 | 管道识别 | 探测模型走 `direct`（OpenRouter）还是 `planner`（Vercel AI Gateway） |
 | 渠道枚举 | 从一次极小额真实请求的响应元数据里读出可用上游清单 |
 | 有序钉住 | 每个模型配一条钉住链，按序尝试、异常自动顺切；另有排除列表 |
+| 能力过滤 | 给规划器管道加 `gateway.has`，让 `only` 真正被执行（否则网关会忽略钉住） |
 | 钉住校验 | 链上每个渠道各钉一次，实测可用性并落盘成状态 |
 | 账号池 | 多账号轮询或手动指定，含官方额度（5 小时 / 本周 / 本月） |
 | 请求历史 | 每条请求实际命中的上游、背后模型、耗时、命中账号 |
@@ -39,7 +40,8 @@ Cline Pass 订阅模型（`cline-pass/*`）请求体里的 `provider.*` 会被�
 ## 快速开始
 
 **装**：从 [Releases](https://github.com/lnsane/cline-pass-switcher-desktop/releases) 下载
-`ClinePassSwitcher-Setup-<版本>.exe`（安装版）或 `-Portable-<版本>.exe`（免安装单文件）。
+`cline-pass-switcher-desktop-upgrade-1024-Setup-<版本>.exe`（安装版）或
+`-Portable-<版本>.exe`（免安装单文件）。
 首次启动到「账号池」添加 Cline Pass 的 API Key（`sk_` 开头）并保存即可用。
 
 > 安装包**未签名**。Windows 开了 Smart App Control 会拦安装版 —— 改用免安装版即可。
@@ -71,6 +73,38 @@ bash scripts/build-mac.sh    # macOS
 | Claude Code | `ANTHROPIC_BASE_URL=http://127.0.0.1:3199` |
 
 模型名照抄 `cline-pass/xxx`。两种协议都支持工具调用与流式。
+
+## 让钉住真正生效：能力过滤 `has`
+
+Cline Pass 的规划器管道上，**只发** `providerOptions.gateway.only` 是不生效的：服务端的虚拟模型
+配置会覆盖客户端的路由限制 —— 实测连一个不存在的上游都能成功返回。2026-10-23 对两把 key 的
+实测发现：同一请求里再加上能力过滤 `providerOptions.gateway.has` 后，`only` 才真正被执行
+（无效上游被拒绝，响应里的 `finalProvider` 变成被钉住的上游）。
+
+本程序的处理：
+
+- **探测不到渠道也能钉**：「订阅模型 → 渠道」不再要求先有渠道清单，直接用「手动添加渠道」
+  填 `deepseek`（或任意上游 slug）即可；加入后照常点测试 / 验证，能不能钉住以验证结果为准。
+- 每个模型可单独配置能力标签（「订阅模型 → 渠道 → 能力过滤」）。默认只对
+  **规划器 + 只钉 `deepseek` + 多模态模型（v4.1-flash / vision）** 自动开启
+  `vision` + `implicit-caching`（那次实测的模型正是这一类）。纯文本模型（如 v4-pro）默认不动：
+  给它加 `vision` 会一个上游都匹配不到，而只加 `implicit-caching` 是否也能让 `only` 生效没有实测证据
+  —— 可在渠道编辑里试，先点两组请求验证再保存。其它模型同样默认关闭：能力过滤会把不满足条件的
+  渠道全部排除，没验证过就默认开启可能直接没有可用上游。
+- 规划器管道上已钉住但没启用能力过滤的模型，列表里会标「钉住可能被忽略」——这就是
+  单独 `only` 不生效的那一类。
+- 请求体顶层是 `{ "providerOptions": { "gateway": { "only": [...], "has": [...] } } }`。
+  直连（OpenRouter）管道不发送 `has`，它本来就能透传 `provider.only`。
+- 「校验全部渠道」会带上当前配置的 `has`，所以校验结果反映真实可钉性，而不是「看似都可用」。
+- 渠道编辑弹窗里的 **验证钉住是否生效（两组请求）** 会复刻实测的对照：A 组带
+  `only=[链首]` + `has`，必须命中链首；B 组把 `only` 换成 `not-a-real-provider`，必须被拒绝。
+  两组同时成立才算「已生效」。
+- 升级提示：如果之前已经钉住 `deepseek` 且是多模态模型，启动时会自动补上这组能力过滤
+  （写回 `config.json`），不用重新配置；纯文本模型保持原样，列表里会提示「钉住可能被忽略」。
+  想关掉的话在渠道编辑里取消勾选即可。
+
+> 这是**实测结论，不是文档承诺**：具体内部机制没有服务端源码可查，不同 key / 模型 / 时间都可能
+> 变化。换 key、换模型后请重新点一次上面的验证，别只看最终回答。
 
 ## 用量统计
 
@@ -115,6 +149,7 @@ DeepSeek 系列另按**官方人民币价目表**计价（元/百万 token）：
 
 ```bash
 npm run test:unit          # 协议翻译状态机
+npm run test:has           # 能力过滤：only+has 注入、两组对照、配置迁移
 npm run test:usage         # 用量统计核心
 npm run test:cny           # DeepSeek 人民币计价（含跨时区校验）
 npm run test:usage-offline # 用量端到端（纯离线）

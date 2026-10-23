@@ -1,4 +1,4 @@
-// Cline Pass Switcher —— Electron 主进程
+// cline-pass-switcher-desktop-upgrade-1024 —— Electron 主进程
 // 职责：托管内嵌引擎（HTTP 代理 + 控制 API）、窗口/托盘/生命周期、把引擎配置暴露给渲染层。
 import { app, BrowserWindow, ipcMain, Tray, Menu, shell, dialog, nativeImage, clipboard } from 'electron';
 import path from 'node:path';
@@ -11,9 +11,31 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const APP_ROOT = path.join(__dirname, '..', '..');
 const RENDERER_DIR = path.join(APP_ROOT, 'src', 'renderer');
 
+// appId / AppUserModelId 保持旧值：改名后 Windows 仍把新版视为同一个应用（升级而非并存）。
 app.setAppUserModelId('com.clinepass.switcher');
 
-// 单实例：第二次启动时聚焦已有窗口
+// ---------- 数据目录 ----------
+// 引擎通过 DATA_DIR 决定 config.json / metadata.json 的位置（沿用命令行版已有的约定）。
+// 应用改名只影响显示名与包名，数据目录继续用旧名 —— 否则升级后会读到一个空目录，
+// 表现为「账号池和密钥全没了」。必须在第一次读 userData 之前 setPath：
+// Electron 默认按 productName 推导它。
+const STABLE_USER_DATA = path.join(app.getPath('appData'), 'Cline Pass Switcher');
+let USER_DATA;
+try {
+  // 新用户：目录不存在就递归创建；老用户：目录已存在，直接复用其中的账号/密钥/历史。
+  fs.mkdirSync(STABLE_USER_DATA, { recursive: true });
+  app.setPath('userData', STABLE_USER_DATA);
+  USER_DATA = app.getPath('userData');
+} catch (e) {
+  // 极端情况：同名路径被文件占住，或用户目录不可写。退回 Electron 默认目录，
+  // 至少保证程序能启动；这种情况下数据是全新的（和全新安装一样）。
+  USER_DATA = app.getPath('userData');
+  console.warn('[数据目录] 无法使用 ' + STABLE_USER_DATA + '，回退到 ' + USER_DATA + '：' + e.message);
+}
+process.env.DATA_DIR = USER_DATA;
+
+// 单实例：第二次启动时聚焦已有窗口。
+// 放在设置 userData 之后 —— 单实例锁与用户数据目录相关，先定目录再抢锁。
 const gotLock = app.requestSingleInstanceLock();
 if (!gotLock) {
   app.quit();
@@ -26,11 +48,6 @@ if (!gotLock) {
     }
   });
 }
-
-// ---------- 数据目录 ----------
-// 引擎通过 DATA_DIR 决定 config.json / metadata.json 的位置（沿用命令行版已有的约定）。
-const USER_DATA = app.getPath('userData');
-process.env.DATA_DIR = USER_DATA;
 
 const SEED_DIR = app.isPackaged
   ? path.join(process.resourcesPath, 'seed')
@@ -188,7 +205,7 @@ function createWindow() {
     minHeight: 620,
     show: false,
     backgroundColor: '#0e1319',
-    title: 'Cline Pass Switcher',
+    title: 'cline-pass-switcher-desktop-upgrade-1024',
     autoHideMenuBar: true,
     // 无边框 + 系统窗口控件叠加：Windows 保留原生最小化/最大化/关闭与窗口吸附，macOS 保留红绿灯
     titleBarStyle: 'hidden',
@@ -273,7 +290,7 @@ function showWindow() {
 function updateTray() {
   if (!tray) return;
   const running = engineState.ok;
-  tray.setToolTip(running ? 'Cline Pass Switcher — 运行中 :' + engineState.port : 'Cline Pass Switcher — 已停止');
+  tray.setToolTip(running ? 'cline-pass-switcher-desktop-upgrade-1024 — 运行中 :' + engineState.port : 'cline-pass-switcher-desktop-upgrade-1024 — 已停止');
   tray.setContextMenu(Menu.buildFromTemplate([
     { label: running ? '运行中 · 127.0.0.1:' + engineState.port : '服务已停止', enabled: false },
     { type: 'separator' },
@@ -389,7 +406,7 @@ function registerIpc() {
         headers: {
           accept: '*/*',
           authorization: 'Bearer ' + k,
-          'user-agent': 'cline-pass-switcher-desktop/' + app.getVersion(),
+          'user-agent': 'cline-pass-switcher-desktop-upgrade-1024/' + app.getVersion(),
         },
         signal: AbortSignal.timeout(20000),
       });

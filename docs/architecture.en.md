@@ -1,4 +1,4 @@
-# Cline Pass Switcher — Desktop
+# cline-pass-switcher-desktop-upgrade-1024 — Desktop
 
 [中文](README.md) · [English](README.en.md)
 
@@ -30,8 +30,11 @@ alongside the USD upstream invoice:
 
 For Cline Pass subscription models (`cline-pass/*`), the `provider.*` field in the request body is
 **dropped** by the Cline gateway, which then picks an upstream itself via its planner. Only `:free`
-variants in the catalog actually pass `provider.only` through to OpenRouter. So "which upstream am
-I actually hitting, can I pin it, and is that pin still alive?" is invisible from the client side.
+variants in the catalog actually pass `provider.only` through to OpenRouter. On the planner pipeline,
+`only` additionally needs the `providerOptions.gateway.has` capability filter to be enforced (see
+"The capability filter" below) — the earlier "pinning doesn't stick" behavior came from missing it.
+So "which upstream am I actually hitting, can I pin it, and is that pin still alive?" is invisible
+from the client side.
 
 This app makes that visible and controllable:
 
@@ -40,6 +43,7 @@ This app makes that visible and controllable:
 | Pipeline detection | Detects whether each model uses `direct` (OpenRouter — injects top-level `provider`) or `planner` (Vercel AI Gateway — injects `providerOptions.gateway`) |
 | Upstream enumeration | Reads the list of available upstreams for a model out of a single tiny real request's response metadata |
 | Ordered pinning | Gives each model a "pin chain": try each upstream in order, falling to the next on the first failure. Plus an exclude list (takes priority over selection) |
+| Capability filter | Adds `providerOptions.gateway.has` on the planner pipeline so `only` is enforced; otherwise the server ignores the pin |
 | Pin verification | Pins each upstream in the chain once to test whether the gateway actually honors it; results are saved as status (available / rate-limited / unpinnable / key issue) |
 | Account pool | Round-robin or manual selection across multiple accounts, with per-account connectivity tests |
 | Official quota | Reads Cline's own usage API for the 5-hour / weekly / monthly windows |
@@ -64,14 +68,47 @@ Use the model name as-is: `cline-pass/xxx`.
 
 ---
 
+## The capability filter: making `only` stick
+
+This is the empirical finding from testing two Cline Pass keys on 2026-10-23; it is the entire basis
+for the `has` field in this project:
+
+1. On the planner pipeline, sending **only** `providerOptions.gateway.only` is overridden by the
+   server-side "virtual model" configuration — a request with `only: ["not-a-real-provider"]` still
+   produced an answer.
+2. Adding `providerOptions.gateway.has = ["vision", "implicit-caching"]` to the same request changed the
+   behavior consistently: invalid upstreams were rejected and `finalProvider` became the target upstream
+   (`deepseek`). Same key, same Pass model — the only difference was `has`.
+3. The guess is that the capability filter removes the current private endpoint and routes the request
+   into a path that enforces `only`; without server source this cannot be asserted.
+
+So `has` is a first-class setting, not a hard-coded trick:
+
+| Where | Behavior |
+|---|---|
+| `perModel[model].has` | Capability tags for that model; an empty array disables the filter. Saved with the pin config |
+| Manual upstream | When probing finds none (the model may be routed to a private endpoint), enter an upstream slug (e.g. `deepseek`) in the chain dialog — it does not depend on probe results |
+| Request injection | Planner (or unprobed) pipeline: `providerOptions.gateway = { only/order/sort, has }`. The direct pipeline never sends `has` |
+| Default | Only "planner + pinned solely to `deepseek` + multimodal (v4.1-flash / vision)" gets `vision` + `implicit-caching`; text-only models (e.g. v4-pro) and everything else start off |
+| Hint | A planner-pipeline model pinned without a capability filter is flagged as "pin may be ignored" |
+| Verification | `validateUpstreams` sends the configured `has`, so results reflect real pinnability instead of "everything looks fine" |
+| Two-group check | `POST /api/verify-pin`: Group A (`only=[target]` + `has`) must match; Group B (`only=[nonexistent]` + `has`) must be rejected |
+
+Why the conservative default: `has` is an **exclusion** filter. `deepseek-v4-pro` is text-only, so giving
+it `vision` would match no upstream; conversely, a model without `implicit-caching` would lose every
+upstream if that tag were enabled blindly. Only the known combinations are covered by default; everything
+else starts off, and the two-group check in the UI decides whether to turn it on.
+
+---
+
 ## Getting started
 
 ### Install (Windows)
 
 Grab a build from the [Releases](https://github.com/lnsane/cline-pass-switcher-desktop/releases) page:
 
-- `ClinePassSwitcher-Setup-<version>.exe` — installer (choose install dir, creates shortcuts)
-- `ClinePassSwitcher-Portable-<version>.exe` — single-file portable
+- `cline-pass-switcher-desktop-upgrade-1024-Setup-<version>.exe` — installer (choose install dir, creates shortcuts)
+- `cline-pass-switcher-desktop-upgrade-1024-Portable-<version>.exe` — single-file portable
 
 On first launch, go to **Accounts**, add your Cline Pass API key (starts with `sk_`), and save.
 The proxy is then ready.
@@ -93,11 +130,11 @@ node src/main/engine/engine.js   # run just the CLI engine (equivalent to the or
 Building (not packaging) is much faster and is unaffected by code-signing restrictions:
 
 ```bat
-scripts\build-win.bat              :: Windows: dist\win-unpacked\Cline Pass Switcher.exe
+scripts\build-win.bat              :: Windows: dist\win-unpacked\cline-pass-switcher-desktop-upgrade-1024.exe
 ```
 
 ```bash
-bash scripts/build-mac.sh          # macOS:   dist/mac*/Cline Pass Switcher.app
+bash scripts/build-mac.sh          # macOS:   dist/mac*/cline-pass-switcher-desktop-upgrade-1024.app
 ```
 
 On Windows you can just **double-click** `scripts\build-win.bat`, or run it from cmd. Both
@@ -218,10 +255,14 @@ directory **before** importing the engine:
 | macOS | `~/Library/Application Support/Cline Pass Switcher/` |
 | Linux | `~/.config/Cline Pass Switcher/` |
 
+> The app is now named `cline-pass-switcher-desktop-upgrade-1024`, but the **data directory keeps the
+> old name on purpose**: renaming must not lose the account pool, keys, or usage history. On startup
+> `main.js` explicitly points `userData` back here.
+
 Contents:
 
-- `config.json` — port, account pool, downstream key (`proxyKey`), `publicBaseUrl`, per-model pinning.
-  **Contains a plaintext key; do not share.**
+- `config.json` — port, account pool, downstream key (`proxyKey`), `publicBaseUrl`, per-model pinning
+  and capability filter (`perModel[*].has`). **Contains a plaintext key; do not share.**
 - `metadata.json` — learning results: upstream lists and status, catalog cache, request history (last 100).
 - `usage/` — the usage ledger, kept in its own directory (**deliberately not folded into metadata.json**; see below):
   - `usage.jsonl` — per-request detail, append-only, never rewritten
@@ -439,11 +480,11 @@ The interface language does **not** affect the language models reply in.
 
 ---
 
-## The one change to the core
+## Changes to the core
 
-`src/main/engine/engine.js` is a verbatim copy of the original `server.js` with only the **end of the
-file** replaced: the original `http.createServer(...)` / `server.listen(...)` block became a set of
-exported functions plus a "only auto-start when run directly" check.
+`src/main/engine/engine.js` started as a verbatim copy of the original `server.js`; the desktop app
+first replaced the **end of the file**: the original `http.createServer(...)` / `server.listen(...)`
+block became a set of exported functions plus a "only auto-start when run directly" check.
 
 ```js
 export { start, stop, config, META, USAGE, saveConfig, saveMeta, isConfigured, publicProxyBase,
@@ -458,8 +499,20 @@ if (isDirectRun) start().then(...).catch(...);
 
 `start({ host, port })` returns `Promise<{ host, port }>` (rejects on `EADDRINUSE`, which the UI uses to
 prompt for another port), and `stop()` calls `closeAllConnections()` before `close()` so restarting does
-not hang on long-lived connections. The ~900 lines of upstream detection / pinning / fallback logic in
-between are **untouched** — that is the most valuable part of this project.
+not hang on long-lived connections.
+
+The capability filter is a **localized addition** on top of that core; the upstream-detection / fallback
+main line is unchanged:
+
+| Location | Change |
+|---|---|
+| `injectPrefs` | Merges `has` with `only/order/sort` into `providerOptions.gateway` on the planner pipeline; the direct pipeline is untouched |
+| `buildAttempts` | Carries `cfg.has` into every failover attempt |
+| `validateUpstreams` | Verification requests also send `has`, so results reflect real pinnability |
+| `harvestAvailableProviders` | If enumeration sees "invalid `only` still succeeds", it retries with `has` instead of treating the ignored `only` as a result |
+| `verifyPinEnforcement` | New two-group check (A matches / B is rejected), exposed as `POST /api/verify-pin` |
+| `migrateGatewayHas` | Backfills `perModel.has`; auto-enables the tested pair only for "planner + pinned solely to deepseek" |
+| `anthropic.js` | `/v1/messages` passes client-supplied `providerOptions` through, so a relay cannot silently drop routing extensions |
 
 ---
 
@@ -470,6 +523,7 @@ Protocol translation (Anthropic ↔ OpenAI Chat) and usage statistics both have 
 | Command | What it covers | Needs upstream? |
 |---|---|---|
 | `npm run test:unit` | `anthropic.js`: request/response/streaming state machine (chunk-boundary buffering, event ordering, tool-argument fragments) | No |
+| `npm run test:has` | Capability filter: `only`+`has` injected together on the planner pipeline, client `providerOptions` passthrough, the two-group `/api/verify-pin` check, the save-time default, no `has` on the direct pipeline, and the `has` retry during upstream enumeration (local fake upstream) | No |
 | `npm run test:live` | Real upstream: non-streaming, streaming, tool calls, tool results fed back, count_tokens, path variants, plus `/v1/chat/completions` regression | Yes |
 | `npm run test:auth` | Auth: `x-api-key` (what Claude Code uses) and `Authorization: Bearer`, plus console-endpoint auth | No (only count_tokens hits upstream) |
 | `npm run test:claudecfg` | Merging, backup, restore, and invalid-JSON refusal for `~/.claude/settings.json` (entirely in a temp dir; never touches your real config) | No |
@@ -518,7 +572,7 @@ BASE=http://127.0.0.1:3251 KEY=<proxy key> npm run test:e2e
   portable build, run the unpacked output of `scripts/build-win.bat`, or turn Smart App Control off
   (irreversible without reinstalling Windows).
 - **macOS Gatekeeper**: unsigned `.app`/`.dmg` are blocked on first open. Right-click → Open, or run
-  `xattr -cr "/Applications/Cline Pass Switcher.app"`.
+  `xattr -cr "/Applications/cline-pass-switcher-desktop-upgrade-1024.app"`.
 - **`dmg` must be built on macOS**, and Windows packages on Windows.
 
 ---

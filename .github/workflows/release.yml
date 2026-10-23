@@ -4,9 +4,9 @@ name: Release
 # 也可以手动触发（workflow_dispatch）—— 适合「先试打一次，不发 Release」。
 #
 # 产出：
-#   - Windows: ClinePassSwitcher-Setup-<版本>.exe（安装版）
-#              ClinePassSwitcher-Portable-<版本>.exe（免安装单文件）
-#   - macOS:   ClinePassSwitcher-<版本>-x64.dmg / -arm64.dmg
+#   - Windows: cline-pass-switcher-desktop-upgrade-1024-Setup-<版本>.exe（安装版）
+#              cline-pass-switcher-desktop-upgrade-1024-Portable-<版本>.exe（免安装单文件）
+#   - macOS:   cline-pass-switcher-desktop-upgrade-1024-<版本>-x64.dmg / -arm64.dmg
 on:
   push:
     tags:
@@ -39,10 +39,12 @@ jobs:
           npm run test:cny
           npm run test:usage-offline
           npm run test:usage-sink
+          npm run test:has
           npm run test:claudecfg
           npm run test:context
           npm run test:i18n
           npm run test:delegate
+          npm run check:secrets
         # 不含 test:usage-e2e / test:live / test:e2e —— 那几个要真实账号密钥
 
   build:
@@ -128,16 +130,16 @@ jobs:
         run: |
           VERSION="${GITHUB_REF_NAME#v}"
           cat > NOTES.md <<EOF
-          ## Cline Pass Switcher ${GITHUB_REF_NAME}
+          ## cline-pass-switcher-desktop-upgrade-1024 ${GITHUB_REF_NAME}
 
           ### 下载
 
           | 平台 | 文件 | 说明 |
           |---|---|---|
-          | Windows | \`ClinePassSwitcher-Setup-${VERSION}.exe\` | 安装版（可选目录、创建快捷方式） |
-          | Windows | \`ClinePassSwitcher-Portable-${VERSION}.exe\` | 免安装单文件 |
-          | macOS (Apple Silicon) | \`ClinePassSwitcher-${VERSION}-arm64.dmg\` | M 系列芯片 |
-          | macOS (Intel) | \`ClinePassSwitcher-${VERSION}-x64.dmg\` | Intel 芯片 |
+          | Windows | \`cline-pass-switcher-desktop-upgrade-1024-Setup-${VERSION}.exe\` | 安装版（可选目录、创建快捷方式） |
+          | Windows | \`cline-pass-switcher-desktop-upgrade-1024-Portable-${VERSION}.exe\` | 免安装单文件 |
+          | macOS (Apple Silicon) | \`cline-pass-switcher-desktop-upgrade-1024-${VERSION}-arm64.dmg\` | M 系列芯片 |
+          | macOS (Intel) | \`cline-pass-switcher-desktop-upgrade-1024-${VERSION}-x64.dmg\` | Intel 芯片 |
 
           ### 未签名说明
 
@@ -146,7 +148,7 @@ jobs:
           - **Windows**：Smart App Control 开启时会拦截安装包（未签名 exe 被 WDAC 策略挡住）。
             可以改用免安装版，或右键 → 属性 → 解除锁定；详见 README「已知边界」。
           - **macOS**：首次打开会被 Gatekeeper 拦。右键 → 打开，或执行
-            \`xattr -cr "/Applications/Cline Pass Switcher.app"\`。
+            \`xattr -cr "/Applications/cline-pass-switcher-desktop-upgrade-1024.app"\`。
 
           ### 首次使用
 

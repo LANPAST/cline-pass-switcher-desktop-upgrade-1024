@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # 本地构建（Windows）—— 只构建，不打包安装包
 #
-# 产物：dist/win-unpacked/Cline Pass Switcher.exe
+# 产物：dist/win-unpacked/cline-pass-switcher-desktop-upgrade-1024.exe
 # 双击即可运行，和装完后的程序是同一份代码。
 #
 # 为什么用「构建」而不是「打包」：
@@ -51,7 +51,7 @@ node scripts/make-icon.mjs
 echo "==> 构建（electron-builder --dir，不打包安装器）"
 npx electron-builder --win --x64 --dir
 
-EXE="dist/win-unpacked/Cline Pass Switcher.exe"
+EXE="dist/win-unpacked/cline-pass-switcher-desktop-upgrade-1024.exe"
 if [ ! -f "$EXE" ]; then
   echo "✗ 构建产物没找到: $EXE"
   exit 1

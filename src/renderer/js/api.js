@@ -80,6 +80,8 @@
     security:        () => API.req('/api/security'),
     saveSecurity:    (payload) => API.req('/api/security', { method: 'POST', body: payload }),
     validateUpstreams: (model) => API.req('/api/validate-upstreams', { method: 'POST', body: { model } }),
+    // 两组对照验证：能力过滤（has）有没有让 only 真正生效
+    verifyPin: (payload) => API.req('/api/verify-pin', { method: 'POST', body: payload, timeoutMs: 300000 }),
     fetchOfficial:   () => API.req('/api/fetch-official-models', { method: 'POST', body: {} }),
     history:         () => API.req('/api/history'),
     config:          () => API.req('/api/config'),
@@ -116,7 +118,7 @@
     async patchPerModel(modelId, patch) {
       const cur = await API.config();
       const perModel = Object.assign({}, cur.perModel || {});
-      perModel[modelId] = Object.assign({ upstreams: [], exclude: [], pinMode: 'strict', sort: null }, perModel[modelId] || {}, patch);
+      perModel[modelId] = Object.assign({ upstreams: [], exclude: [], pinMode: 'strict', sort: null, has: [] }, perModel[modelId] || {}, patch);
       await API.savePerModel(perModel);
       return perModel[modelId];
     },

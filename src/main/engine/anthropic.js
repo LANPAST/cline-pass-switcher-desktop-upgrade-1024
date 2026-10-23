@@ -134,6 +134,9 @@ export function toChatRequest(anth) {
   if (anth.temperature != null) out.temperature = anth.temperature;
   if (anth.top_p != null) out.top_p = anth.top_p;
   if (Array.isArray(anth.stop_sequences) && anth.stop_sequences.length) out.stop = anth.stop_sequences;
+  // 路由扩展字段原样透传：中转把 providerOptions 丢掉的话，网关侧的 only/has 就不会生效。
+  // （引擎随后会在这上面合并自己的钉住/能力过滤配置，见 engine.js 的 injectPrefs。）
+  if (anth.providerOptions && typeof anth.providerOptions === 'object') out.providerOptions = anth.providerOptions;
 
   if (Array.isArray(anth.tools) && anth.tools.length) {
     const tools = anth.tools

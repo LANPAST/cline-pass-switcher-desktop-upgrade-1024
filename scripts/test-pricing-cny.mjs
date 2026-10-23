@@ -70,6 +70,7 @@ function bj(y, m, d, h, min = 0) {
   eq(resolveDeepseekModel('deepseek-v4-flash'), 'deepseek-flash', '2.6 旧名 v4-flash → flash 价');
   eq(resolveDeepseekModel('deepseek-v4-flash-vision-exp'), 'deepseek-flash', '2.7 旧视觉名 → flash 价');
   eq(resolveDeepseekModel('deepseek-v4-flash-0731'), 'deepseek-flash', '2.8 带日期旧名 → flash 价');
+  eq(resolveDeepseekModel('cline-pass/deepseek-v4.1-flash-1017'), 'deepseek-flash', '2.8b 1017 快照 → flash 价');
   // 不是 DeepSeek 的一律认不出
   eq(resolveDeepseekModel('k3'), null, '2.9 k3 没有人民币价');
   eq(resolveDeepseekModel('cline-pass/glm-5.3-flash'), null, '2.10 glm 没有人民币价');

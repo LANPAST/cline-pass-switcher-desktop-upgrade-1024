@@ -1,4 +1,4 @@
-# Cline Pass Switcher —— 桌面版
+# cline-pass-switcher-desktop-upgrade-1024 —— 桌面版
 
 [中文](README.md) · [English](README.en.md)
 
@@ -27,6 +27,8 @@ DeepSeek 系列另按官方人民币价目表计价（含峰谷时段），与�
 
 Cline Pass 的订阅模型（`cline-pass/*`）请求体里的 `provider.*` 会被 Cline 网关**丢掉**，改由网关的规划器
 自己挑上游；只有目录模型里的 `:free` 变体才会把 `provider.only` 真正透传到 OpenRouter。
+规划器管道上还得再加一层能力过滤 `providerOptions.gateway.has`，`only` 才会被执行（见下文
+「能力过滤」一节）——这是后来实测出来的，早先只有 `only` 时看到的「钉不住」正源于此。
 于是「我到底被路由到了哪个上游、能不能固定住、固定的那个还活着吗」这件事，光看客户端是看不出来的。
 
 这个程序把这件事做成可视化的：
@@ -36,6 +38,7 @@ Cline Pass 的订阅模型（`cline-pass/*`）请求体里的 `provider.*` 会�
 | 管道识别 | 探测每个模型走 `direct`（OpenRouter，注入顶层 `provider`）还是 `planner`（Vercel AI Gateway，注入 `providerOptions.gateway`） |
 | 渠道枚举 | 从一次极小额真实请求的响应元数据里，读出该模型可用的上游清单 |
 | 有序钉住 | 给每个模型配一条「钉住链」：按顺序逐个尝试，前一个异常自动顺切下一个；另有排除列表（优先级高于勾选） |
+| 能力过滤 | 给规划器管道加 `providerOptions.gateway.has`，让 `only` 真正被执行；否则服务端会忽略钉住 |
 | 钉住校验 | 把链上每个渠道各钉一次，实测能否被网关采纳，结果落盘成状态（可用 / 限流 / 不可钉 / 密钥问题） |
 | 账号池 | 多账号轮询或手动指定，单账号连通性测试 |
 | 官方额度 | 直接读 Cline 用量接口的 5 小时 / 本周 / 本月三个窗口 |
@@ -57,14 +60,44 @@ Cline Pass 的订阅模型（`cline-pass/*`）请求体里的 `provider.*` 会�
 
 ---
 
+## 能力过滤：让 `only` 真正生效
+
+这是 2026-10-23 对两把 Cline Pass key 的实测结论，也是本项目 `has` 字段的全部依据：
+
+1. 规划器管道上**单独**发 `providerOptions.gateway.only` 时，服务端的「虚拟模型配置」会覆盖客户端的
+   路由限制 —— 实测连 `only: ["not-a-real-provider"]` 都能成功生成回答。
+2. 在同一请求里加上 `providerOptions.gateway.has = ["vision", "implicit-caching"]` 后，行为稳定变化：
+   无效上游被拒绝，`finalProvider` 变成目标上游（`deepseek`）。同一把 key、同一个 Pass 模型，
+   加与不加是两种结果。
+3. 推测是能力过滤排除了当前私有落点、让请求进入能执行 `only` 的路由；没有服务端源码，不能断言。
+
+因此本程序把 `has` 做成一等配置，而不是写死在代码里：
+
+| 位置 | 行为 |
+|---|---|
+| `perModel[model].has` | 该模型的能力标签数组；空数组 = 关闭。随钉住配置一起保存 |
+| 手动渠道 | 探测不到渠道（模型可能被顶到私有落点）时，可在渠道编辑里手填上游 slug（如 `deepseek`），不依赖探测结果 |
+| 请求注入 | 规划器（或未探测）管道：`providerOptions.gateway = { only/order/sort, has }`。直连管道不发 `has` |
+| 默认值 | 只有「规划器 + 只钉 `deepseek` + 多模态（v4.1-flash / vision）」自动带 `vision` + `implicit-caching`；纯文本模型（如 v4-pro）与其它情况默认关闭 |
+| 提示 | 规划器管道已钉住但没启用能力过滤时，模型列表标「钉住可能被忽略」 |
+| 校验 | `validateUpstreams` 带上当前 `has`，避免出现「每个渠道都可用」的假象 |
+| 对照验证 | `POST /api/verify-pin` 发两组请求：A 组 `only=[目标]`+`has` 必须命中；B 组 `only=[不存在]`+`has` 必须被拒绝 |
+
+关于默认值为什么这么保守：`has` 是**排除性**过滤，不满足标签的渠道会全部消失。比如
+`deepseek-v4-pro` 是纯文本模型，给它带 `vision` 会一个上游都匹配不到；反过来，一个不支持
+`implicit-caching` 的模型带上它也会直接变成「没有可用上游」。所以默认只覆盖已经知道的组合，
+其余模型默认关闭，由界面上的两组对照验证决定要不要开。
+
+---
+
 ## 快速开始
 
 ### 直接装（Windows）
 
 到 `dist/` 取构建产物：
 
-- `ClinePassSwitcher-Setup-<版本>.exe` —— 安装版（可选安装目录、创建桌面与开始菜单快捷方式）
-- `ClinePassSwitcher-Portable-<版本>.exe` —— 免安装单文件
+- `cline-pass-switcher-desktop-upgrade-1024-Setup-<版本>.exe` —— 安装版（可选安装目录、创建桌面与开始菜单快捷方式）
+- `cline-pass-switcher-desktop-upgrade-1024-Portable-<版本>.exe` —— 免安装单文件
 
 首次启动后到「账号池」添加 Cline Pass 的 API Key（`sk_` 开头）并保存，代理即可用。
 
@@ -81,11 +114,11 @@ node src/main/engine/engine.js   # 只跑命令行版内核（等价于原 serve
 构建比打包快得多，也不受代码签名限制影响：
 
 ```bat
-scripts\build-win.bat              :: Windows：dist\win-unpacked\Cline Pass Switcher.exe
+scripts\build-win.bat              :: Windows：dist\win-unpacked\cline-pass-switcher-desktop-upgrade-1024.exe
 ```
 
 ```bash
-bash scripts/build-mac.sh          # macOS：dist/mac*/Cline Pass Switcher.app
+bash scripts/build-mac.sh          # macOS：dist/mac*/cline-pass-switcher-desktop-upgrade-1024.app
 ```
 
 Windows 上直接**双击** `scripts\build-win.bat` 也可以，或在 cmd 里执行。两个脚本都支持
@@ -192,9 +225,13 @@ scripts/make-icon.mjs      零依赖图标生成器
 | macOS | `~/Library/Application Support/Cline Pass Switcher/` |
 | Linux | `~/.config/Cline Pass Switcher/` |
 
+> 应用已改名为 `cline-pass-switcher-desktop-upgrade-1024`，但**数据目录故意沿用旧名**：
+> 改名不能把账号池、密钥和用量历史弄丢。启动时 `main.js` 会显式把 `userData` 指回这里。
+
 里面是：
 
-- `config.json` —— 端口、账号池、下游密钥（`proxyKey`）、`publicBaseUrl`、每个模型的钉住配置。**含明文密钥，不要外传。**
+- `config.json` —— 端口、账号池、下游密钥（`proxyKey`）、`publicBaseUrl`、每个模型的钉住配置与
+  能力过滤（`perModel[*].has`）。**含明文密钥，不要外传。**
 - `metadata.json` —— 学习结果：渠道清单与状态、目录缓存、请求历史（最近 100 条）。
 - `usage/` —— 用量统计账本，单独一个目录（**不混进 metadata.json**，理由见下）：
   - `usage.jsonl` —— 逐条请求明细，只追加、从不重写
@@ -240,9 +277,9 @@ CC Switch v3 起把供应商存在 SQLite（`~/.cc-switch/cc-switch.db`）里。
 
 ---
 
-## 对内核做的唯一改动
+## 对内核做的改动
 
-`src/main/engine/engine.js` 是原 `server.js` 的逐字副本，只有**文件尾部**被替换：
+`src/main/engine/engine.js` 原本是原 `server.js` 的逐字副本，桌面版首先替换了**文件尾部**：
 原来的 `http.createServer(...)` / `server.listen(...)` 那一段，改成导出一组函数，并加了「直接运行才自启」的判断。
 
 ```js
@@ -258,7 +295,18 @@ if (isDirectRun) start().then(...).catch(...);
 
 `start({ host, port })` 返回 `Promise<{ host, port }>`（`EADDRINUSE` 会 reject，界面据此提示换端口），
 `stop()` 先 `closeAllConnections()` 再 `close()`，这样重启服务不会挂住长连接。
-中间九百多行上游探测 / 钉住 / 回退逻辑**一行没动**——那是这个项目最贵的部分。
+
+能力过滤是在这套内核上做的**局部增补**，没有改写上游探测 / 回退的主干：
+
+| 位置 | 改动 |
+|---|---|
+| `injectPrefs` | 规划器管道把 `has` 与 `only/order/sort` 一起合并进 `providerOptions.gateway`；直连管道不变 |
+| `buildAttempts` | 把 `cfg.has` 带进每次故障转移尝试 |
+| `validateUpstreams` | 校验请求也带 `has`，结果才反映真实可钉性 |
+| `harvestAvailableProviders` | 渠道枚举发现「无效 only 也能成功」时，带上 `has` 再探一次，避免把被忽略的 only 当成枚举结果 |
+| `verifyPinEnforcement` | 新增两组对照（A 命中 / B 被拒），`POST /api/verify-pin` 暴露给界面 |
+| `migrateGatewayHas` | 老配置补 `perModel.has`；只对「规划器 + 只钉 deepseek」自动启用实测组合 |
+| `anthropic.js` | `/v1/messages` 把客户端带来的 `providerOptions` 原样透传，避免中转吞掉路由扩展字段 |
 
 ---
 
@@ -416,6 +464,7 @@ DeepSeek 系列除了上游的美元账单，还按**官方人民币价目表**�
 | 命令 | 测什么 | 需要上游吗 |
 |---|---|---|
 | `npm run test:unit` | `anthropic.js` 的请求/响应/流式状态机（含跨 chunk 缓冲、事件序列、工具参数分片） | 否 |
+| `npm run test:has` | 能力过滤：规划器管道 `only`+`has` 一起注入、客户端 `providerOptions` 透传、`/api/verify-pin` 两组对照、保存默认值、直连管道不注入 `has`、渠道枚举的 `has` 兜底（本地假上游） | 否 |
 | `npm run test:live` | 真实上游：非流式、流式、工具调用、工具结果回灌、count_tokens、路径写法，以及 `/v1/chat/completions` 的回归 | 是 |
 | `npm run test:auth` | 鉴权：`x-api-key`（Claude Code 用的）与 `Authorization: Bearer`，以及控制台接口的鉴权 | 否（只 count_tokens 打上游） |
 | `npm run test:claudecfg` | 写 `~/.claude/settings.json` 的合并、备份、还原、非法 JSON 拒绝写入（全程在临时目录，不碰真实配置） | 否 |

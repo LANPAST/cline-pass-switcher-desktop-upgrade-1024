@@ -105,8 +105,8 @@
     renderOut('<span class="muted">正在验证钉住是否被网关采纳…</span>');
     try {
       const cfgRes = await API.config();
-      const cfg = (cfgRes.perModel || {})[model] || { upstreams: [], exclude: [] };
-      const r = await API.test({ model, upstreams: cfg.upstreams || [], exclude: cfg.exclude || [] });
+      const cfg = (cfgRes.perModel || {})[model] || { upstreams: [], exclude: [], has: [] };
+      const r = await API.test({ model, upstreams: cfg.upstreams || [], exclude: cfg.exclude || [], has: cfg.has || [] });
       const adopted = (cfg.upstreams || []).length && r.ok && (cfg.upstreams || []).includes(r.actual);
       renderOut(
         (r.ok
@@ -115,6 +115,7 @@
               (!(cfg.upstreams || []).length ? '未配置钉住链（网关自选）' : adopted ? '网关采纳了钉住' : '网关未采纳，实际走了 ' + (r.actual || '未知')) + '</div>'
           : '<div class="badge b-critical" style="margin-bottom:10px"><span class="b-ico">✘</span>请求失败</div>') +
         U.kv('配置链', (cfg.upstreams || []).length ? '<span class="mono">' + cfg.upstreams.map(U.esc).join(' → ') + '</span>' : '<span class="muted">自动</span>') +
+        ((cfg.has || []).length ? U.kv('能力过滤', '<span class="mono">' + cfg.has.map(U.esc).join(', ') + '</span>') : '') +
         metaRows({ actual: r.actual, canonical: r.canonicalSlug, ms: r.ms, account: r.account }) +
         (r.trace ? U.kv('尝试路径', U.attemptPath(r.trace)) : '') +
         (r.content ? '<div class="field" style="margin-top:10px"><div class="mono" style="background:var(--surface-2);border:1px solid var(--hairline);border-radius:7px;padding:10px;user-select:text">' + U.esc(r.content) + '</div></div>' : '') +

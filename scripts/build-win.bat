@@ -2,7 +2,7 @@
 rem ============================================================================
 rem  本地构建（Windows）—— 只构建，不打包安装包
 rem
-rem  产物：dist\win-unpacked\Cline Pass Switcher.exe
+rem  产物：dist\win-unpacked\cline-pass-switcher-desktop-upgrade-1024.exe
 rem  双击即可运行，和装完后的程序是同一份代码。
 rem
 rem  为什么用「构建」而不是「打包」：
@@ -94,7 +94,7 @@ call node scripts/make-icon.mjs || goto fail_build
 echo ==^> 构建（electron-builder --dir，不打包安装器）
 call npx electron-builder --win --x64 --dir || goto fail_build
 
-set "EXE=dist\win-unpacked\Cline Pass Switcher.exe"
+set "EXE=dist\win-unpacked\cline-pass-switcher-desktop-upgrade-1024.exe"
 if not exist "%EXE%" goto no_artifact
 
 for %%I in ("%EXE%") do set "BYTES=%%~zI"
@@ -128,7 +128,7 @@ rem ---------------------------------------------------------------- 出错分支
 echo.
 echo 构建中止：本仓库 dist\ 下的程序正在运行（PID:%PIDS%）
 echo.
-echo   那份正在跑的就是 dist\win-unpacked\Cline Pass Switcher.exe。
+echo   那份正在跑的就是 dist\win-unpacked\cline-pass-switcher-desktop-upgrade-1024.exe。
 echo   --clean 会把它的文件删掉；不 --clean 也会因为文件被占用而构建失败。
 echo   所以这里直接停下，不会替你结束进程。
 echo.
@@ -138,7 +138,7 @@ goto fail_plain
 
 :clean_failed
 echo dist\ 删不干净 —— 多半还有进程占着里面的文件。
-echo   请退出正在运行的 Cline Pass Switcher 后重试。
+echo   请退出正在运行的 cline-pass-switcher-desktop-upgrade-1024 后重试。
 goto fail_plain
 
 :no_artifact
@@ -169,7 +169,7 @@ echo   scripts\build-win.bat             构建 x64
 echo   scripts\build-win.bat --clean     先删 dist\ 再构建
 echo   scripts\build-win.bat --run       构建完直接启动
 echo.
-echo 产物：dist\win-unpacked\Cline Pass Switcher.exe
+echo 产物：dist\win-unpacked\cline-pass-switcher-desktop-upgrade-1024.exe
 echo 要出正式安装包 / 免安装单文件：npm run dist:win
 call :restore_cp
 endlocal

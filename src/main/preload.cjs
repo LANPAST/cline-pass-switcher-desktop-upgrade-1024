@@ -1,4 +1,4 @@
-// Cline Pass Switcher —— 预加载脚本（CommonJS：sandbox 模式下预加载必须是 CJS）
+// cline-pass-switcher-desktop-upgrade-1024 —— 预加载脚本（CommonJS：sandbox 模式下预加载必须是 CJS）
 // 只通过 contextBridge 暴露一组受控的、可枚举的能力，渲染层拿不到 Node / ipcRenderer 本体。
 const { contextBridge, ipcRenderer } = require('electron');
 
