@@ -199,3 +199,7 @@ npm run test:i18n          # 双语覆盖
 ## 许可
 
 MIT。
+
+## 友情链接
+
+- [LINUX DO 社区](https://linux.do/) —— 感谢社区提供的实测分享与讨论。

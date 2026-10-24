@@ -215,3 +215,7 @@ into CI; run them locally with `BASE=` and `KEY=`.
 ## License
 
 MIT.
+
+## Friendly links
+
+- [LINUX DO community](https://linux.do/) — thanks for the field tests and discussion shared there.
